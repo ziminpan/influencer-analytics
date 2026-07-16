@@ -18,7 +18,7 @@ MACHINE_COLS = {
     "engagement_basis", "raw_samples", "traffic_type", "data_confidence",
     "collected_at", "score_fit", "score_engagement", "score_audience",
     "score_content", "score_value", "score_total", "expected_exposure", "cpm",
-    "profile_url",
+    "profile_url", "official_reads_median",
 }
 HUMAN_COLS = {
     "status", "first_contact_date", "last_followup_date", "quote_image",
@@ -60,7 +60,7 @@ def audit_median(c, warnings):
     vals = [float(x) for x in str(raw).replace("；", ";").split(";") if str(x).strip().replace(".", "").isdigit()]
     name = c.get("name")
     if not vals:
-        warnings.append(f"{name}: 有中位数但无 raw_samples 凭据，中位数已拒绝入库")
+        warnings.append(f"[拒绝] {name}: 有中位数但无 raw_samples 凭据，中位数不入库。下一步：补采原始样本后重跑")
         c["median_engagement"] = ""
         c["data_confidence"] = "low"
         return
@@ -70,16 +70,16 @@ def audit_median(c, warnings):
         med_f = float(med)
     except ValueError:
         c["median_engagement"] = ""; c["data_confidence"] = "low"
-        warnings.append(f"{name}: 中位数非数字，已拒绝")
+        warnings.append(f"[拒绝] {name}: 中位数非数字，不入库。下一步：检查采集输出格式")
         return
     if basis.endswith("_inferred"):
         ratio = med_f / m if m else 0
         if not (1.0 <= ratio <= 40.0):
-            warnings.append(f"{name}: 推断口径系数异常({ratio:.1f}x)，标 low 请复核")
+            warnings.append(f"[降级] {name}: 推断口径系数异常({ratio:.1f}x)，标 low。下一步：人工复核该行系数来源")
             c["data_confidence"] = "low"
     else:
         if abs(med_f - m) > 1:
-            warnings.append(f"{name}: 中位数{med_f}与样本复算值{m}不符，以复算值为准")
+            warnings.append(f"[降级] {name}: 中位数{med_f}与样本复算值{m}不符，已改用复算值。下一步：排查该行中位数从何而来")
             c["median_engagement"] = int(m)
     if len(vals) < 10:
         c["data_confidence"] = "low"
@@ -102,7 +102,7 @@ def main(cand_path, csv_path):
         c["followers"] = fol
         if not ok:
             c["data_confidence"] = "low"
-            warnings.append(f"{c.get('name')}: 粉丝数非纯数字，置空并标 low")
+            warnings.append(f"[降级] {c.get('name')}: 粉丝数非纯数字（疑似登出态桶值），置空并标 low。下一步：确认登录态后重采")
         audit_median(c, warnings)
         key = (c.get("platform"), c.get("name"))
         if key in index:                       # 已存在 → 只刷机器列
@@ -112,7 +112,7 @@ def main(cand_path, csv_path):
                     refreshed.append(f"{key[1]}.{k}: {row.get(k)!r}→{v!r}")
                     row[k] = v
                 elif k in HUMAN_COLS and row.get(k) not in (None, "") and v not in (None, ""):
-                    warnings.append(f"{key[1]}.{k}: 人类列已有值，保留 {row.get(k)!r}，忽略 {v!r}")
+                    warnings.append(f"[提示] {key[1]}.{k}: 人类列已有值，保留 {row.get(k)!r}，忽略 {v!r}")
             if c.get("log_append"):
                 row["log_outreach"] = (row.get("log_outreach", "") + "；" + c["log_append"]).strip("；")
         else:                                  # 新增
@@ -134,6 +134,7 @@ def main(cand_path, csv_path):
         print("⚠ 警告:")
         for x in warnings:
             print("  -", x)
+        print("下一步总览：低置信行请人工复核；怀疑采集逻辑整体坏了，先跑哨兵（SKILL.md 第10节第0步）。")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,34 @@
+# 哨兵账号（Sanity Test）——一次运行分清"平台改版"还是"个例数据奇葩"
+#
+# 用法：复制本文件为 tests/sentinels.yaml，填入你自己的标杆账号（每平台 1 主 1 备）。
+# sentinels.yaml 含真实账号信息，与 config.yaml 同纪律：不提交到公开仓库。
+#
+# 选择标准：粉丝稳定（成熟账号）、从不出爆文（近10篇 最大值/中位数 < 3）、
+#          更新规律、无置顶爆款、非搜索流型。
+# 断言只写结构性区间，不写精确值——标杆账号自己也会涨粉发文，
+# 写死数值的哨兵过两个月会自己假报警。
+#
+# 冷启动（还没建库、无从挑起）：先选 2 个你熟悉的、更新规律的垂类账号顶上；
+# 建库满 10 人后对 Claude 说"按库里数据重选哨兵"——它会按各行 raw_samples 的
+# 最大值/中位数（爆文比）排序，推荐每平台最稳的 1 主 1 备，经你确认后替换。
+sentinels:
+  - platform: 小红书
+    name: ""                    # 博主昵称
+    profile_url: ""
+    asserts:
+      followers_numeric: true   # 粉丝解析为纯数字（登录态正常的信号）
+      followers_range: [0, 0]   # 上次已知值 ±50%
+      min_notes_visible: 5      # 至少取到 5 篇笔记
+      median_recomputable: true # 中位数能从原始样本复算（±1）
+      no_bucket_values: true    # 不出现"1千+"类桶值
+  - platform: 抖音
+    name: ""
+    profile_url: ""
+    asserts:
+      followers_numeric: true
+      followers_range: [0, 0]
+      min_notes_visible: 5
+      median_recomputable: true
+      no_bucket_values: true
+# 跑法：对 Claude 说"跑一次健康检查"——按 SKILL.md 第 10 节第 0 步执行。
+# 哨兵全过 = 核心流程没坏，刚才的失败是个例；哨兵也挂 = 平台改版，进修复流程。

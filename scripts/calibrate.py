@@ -49,10 +49,10 @@ def main(path, cfg_path=None):
     n = len(pts)
     print(f"=== 报价校准 · 有效样本 {n} 份 ===\n")
     if n < cfg["min_samples_for_output"]:
-        print(f"样本不足（< {cfg['min_samples_for_output']}），不输出校准 CPM。原始散点：")
+        print(f"[拒绝] 样本不足（< {cfg['min_samples_for_output']}），有意不输出校准 CPM。原始散点：")
         for fol, cpm, name, t in sorted(pts):
             print(f"  {name}({t}, {fol}粉): CPM {cpm}")
-        print("\n建议：继续收集报价，达到门槛后重跑。当前仍用 config 里的行业参考区间。")
+        print("\n下一步：继续收集报价，达到门槛后重跑。当前仍用 config 里的行业参考区间。")
         return
 
     # 分档中位
@@ -63,7 +63,7 @@ def main(path, cfg_path=None):
             print(f"  {name}: 中位 CPM {st.median(vals):.1f}（n={len(vals)}, "
                   f"范围 {min(vals):.0f}–{max(vals):.0f}）")
         elif vals:
-            print(f"  {name}: 样本 {len(vals)} 不足，暂不给档位值")
+            print(f"  [拒绝] {name}: 档内样本仅 {len(vals)}，有意不给档位值")
 
     # 回归（样本充足时）
     tiers_ok = sum(1 for _, lo, hi in TIERS
@@ -77,7 +77,7 @@ def main(path, cfg_path=None):
         a = my - b * mx
         print(f"\nlog-log 回归: CPM ≈ {10**a:.2f} × followers^{b:.3f}")
     else:
-        print(f"\n（样本达 {cfg['min_samples_for_regression']} 且两档各≥5 才做回归，当前不做）")
+        print(f"\n[拒绝] 样本达 {cfg['min_samples_for_regression']} 且两档各≥5 才做回归，当前有意不做。")
 
 
 if __name__ == "__main__":

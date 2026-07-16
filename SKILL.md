@@ -8,7 +8,8 @@ description: >-
   screenshots or chat logs to be parsed into the database (报价解析/更新触达状态),
   asks 报价贵不贵/该还价多少 (run calibration), or wants a campaign report from the
   creator CSVs. Also trigger when the user mentions KOL outreach, influencer
-  discovery, creator database, 蒲公英/星图报价, 中位数筛选, or asks to repair a broken
+  discovery, creator database, 蒲公英/星图报价, 蒲公英对账, 中位数筛选, asks to
+  跑健康检查/哨兵测试 (sentinel sanity check), or asks to repair a broken
   collection playbook (采集失效/选择器失效).
 ---
 
@@ -127,6 +128,12 @@ description: >-
   `预期播放 = 中位播放 × commercial_discount`。拿到后台截图后用真实值替换，
   `engagement_basis` 从 `plays_inferred` 改为 `plays`。
 - 博主后台数据、蒲公英/星图官方数据**永远优先于**一切估算值。
+- **蒲公英对账（品牌号已开通时优先执行）**：在蒲公英按昵称查已入库博主，官方
+  「阅读中位数」写入 `official_reads_median` 并覆盖 `expected_exposure`
+  （data_confidence=high，AD 备注"蒲公英官方值 YYYY-MM"）；刊例价进 quote_*，
+  `quote_notes` 标"蒲公英刊例"。凑够 ≥8 个「官方值 vs 估算值」对照后，用**比值中位数**
+  修正 `xhs_read_multiplier`（人工确认后写回 config，CHANGELOG 记一行）。
+  搜不到 = 未入驻或粉丝 <1000，保持估算值。操作手册：`playbooks/pgy.md`。
 
 ## 9. 平台细节与采集脚本
 
@@ -134,19 +141,44 @@ description: >-
 
 - 小红书：`playbooks/xiaohongshu.md`
 - 抖音：`playbooks/douyin.md`
+- 蒲公英（小红书官方商单平台，品牌视角官方数据）：`playbooks/pgy.md`
 - 海外平台（Instagram/TikTok）：v0.1 未实现。插槽已预留，不要临场发挥去采集
   海外平台——未经实测的流程不写、不跑。
 
-## 10. 采集失效了怎么办（自修复指引）
+## 10. 采集失效了怎么办（哨兵 → 定位 → 有界自修）
 
-平台改版会让选择器失效，这是预期内的正常损耗，不是 bug。修复流程：
+平台改版会让选择器失效，这是预期内的正常损耗，不是 bug。
+
+**第 0 步永远是跑哨兵**：`tests/sentinels.yaml`（模板 `tests/sentinels.example.yaml`）
+存着每平台 1 主 1 备"粉丝稳定、从不出爆文"的标杆账号。哨兵能正常出数 = 核心流程没坏，
+刚才失败的账号是个例（特殊字符/未公开数据/被限流）；哨兵也挂 = 平台改版，进修复流程。
+哨兵断言只写**结构性区间**（粉丝为纯数字且落在区间、可见作品 ≥N、中位可复算、无桶值），
+不写精确值——标杆账号自己也会涨粉发文。用户说"跑一次健康检查"= 单独执行本步。
+
+**哨兵怎么挑/换**：建库 ≥10 人后，按各行 `raw_samples` 的 最大值/中位数（爆文比）排序，
+取每平台最低的 1 主 1 备（更新规律者优先）；用户说"重选哨兵"即按此推荐、经确认后更新
+`sentinels.yaml`。冷启动期（库还空着）先用任意 2 个更新规律的垂类账号顶上，满 10 人再换。
+
+修复流程：
 
 1. 先跑登录态检查——**九成"失效"其实是被登出了**。
-2. 打开一个真实主页，对照 playbook 里的选择器逐个在控制台验证，找出失效的那个。
+2. 打开哨兵主页，对照 playbook 里的选择器逐个在控制台验证，找出失效的那个。
 3. 用浏览器工具查看新 DOM，更新 playbook 中对应 JS 片段，**只改选择器不改流程**。
 4. 修好后在 playbook 文件顶部的 changelog 里记一行（日期 + 改了什么）。
 5. ID 时间戳解码（decode_note_time.py）基于底层数据结构，几乎不会失效——
    当 DOM 全面失效时，它是最后的可靠数据源。
+
+**自修边界（三条，越界即停）**：
+
+1. 红线参数（pacing、每日上限、样本门槛）**永远不许自调**——靠"重试更快"来自愈的
+   采集器，就是封号的标准路径。
+2. 同一目标重试 ≤2 次，之后必须停下报告，不许换姿势硬试。
+3. playbook 修改以 changelog 提案形式给用户过目后落盘，不做静默自改。
+
+**日志三级**（scripts 与轮次报告统一使用，每条必须带"下一步"）：
+`[停]` 触发红线（验证码/登录态丢失 → 当日停采）；`[降级]` 继续跑但 data_confidence=low；
+`[拒绝]` 有意不输出（如样本 <8 不给校准结论）。
+示例：`[停] 小红书出现扫码验证。下一步：今日停采，明天先跑哨兵再恢复。`
 
 用户在任何终端/Cowork 会话里说"采集失效了，帮我修"，按上述流程执行即可。
 

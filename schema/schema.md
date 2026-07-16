@@ -26,7 +26,8 @@
 | first_contact_date / last_followup_date | date | 人类 | 触达/跟进日期 |
 | quote_image / quote_video | int | 人类 | 报价，**纯数字，只存博主底价** |
 | quote_notes | str | 人类 | "+200平台费"这类说明 |
-| expected_exposure | int | 机器 | 预期阅读/播放 |
+| expected_exposure | int | 机器 | 预期阅读/播放。**官方值优先**：有 official_reads_median 时以其覆盖 |
+| official_reads_median | int | 机器 | 平台官方后台口径的阅读/播放中位数（蒲公英/星图/后台截图），估算系数校正的对照锚点 |
 | budget_planned | int | 人类 | 实付全款 = 报价×(1+platform_fee_rate) |
 | cpm | float | 机器 | = budget_planned ÷ expected_exposure × 1000 |
 | approval | str | 人类 | 待审/✔通过/✘否决/暂缓 |
@@ -48,6 +49,7 @@
 | 字段 | 说明 |
 |---|---|
 | result_id | 自增 |
+| campaign | 战役标识（如 `roadtrip-2026Q3`）。博主库是跨战役的关系资产，效果行按战役归属 |
 | creator_id | 外键 → db 的 id |
 | market | cn / intl |
 | post_url | 已发布内容链接 |
