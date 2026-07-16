@@ -1,17 +1,15 @@
 ---
-name: Idea / enhancement
-about: Feature or methodology improvement
-labels: idea
+name: Platform drift
+about: XHS / Douyin / Pgy page structure changed — selectors failing
+labels: platform-drift
 ---
 
-**Problem / opportunity**
-<!-- what hurts today, or what new data source / method became available -->
+**Signal**
+<!-- which selector/field died; sentinel run result that confirmed it's site-wide -->
 
-**Proposal**
-<!-- the smallest version that proves value -->
+**Diagnosis**
+<!-- what changed in the DOM; how it was located -->
 
-**Cost & risks**
-<!-- schema changes? rate-limit exposure? maintenance burden? -->
-
-**Decision**
-<!-- adopted in vX.X.X / rejected because ... / parked until ... -->
+**Patch**
+<!-- playbook changelog entry (date + what changed) and the commit link.
+     Reminder: selector-only fixes, never touch pacing/red-line params. -->
