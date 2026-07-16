@@ -1,0 +1,18 @@
+[
+  {
+    "platform": "小红书",
+    "name": "示例博主A",
+    "niche": "AI工具/效率",
+    "followers": 4985,
+    "posts_30d": 12,
+    "median_engagement": 356,
+    "engagement_basis": "likes_saves",
+    "raw_samples": "17;76;33;1535;170;827;92;200",
+    "traffic_type": "fan_based",
+    "data_confidence": "high",
+    "collected_at": "2026-07-15",
+    "score_fit": 92, "score_engagement": 85, "score_content": 90,
+    "profile_url": "https://www.xiaohongshu.com/user/profile/xxxx",
+    "log_append": "2026-07-15 首次私信"
+  }
+]

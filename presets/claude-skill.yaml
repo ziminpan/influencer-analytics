@@ -1,0 +1,37 @@
+# claude-skill 预设：推广一个 Claude Skill（本项目的实测预设）。
+# 系数与关键词库来自 2026-07 的真实投放，是本 skill 唯一有数据背书的预设。
+preset_name: claude-skill
+product:
+  brand_name: ""
+  repo_url: ""                     # 填你的 skill 仓库，如 github.com/Waybox-AI/roadtrip-skill
+  pitch_one_liner: ""
+  repo_slug: ""                    # 话术里"GitHub 搜 xxx"的搜索词
+  web_fallback: ""                 # 网页版兜底地址（评论区卡片用）
+  kpi: [github_stars, github_uv]
+
+discovery:
+  keywords_xiaohongshu:
+    - Claude Code 教程
+    - Claude 技能
+    - Claude skills
+    - AI编程
+    - AI效率工具
+    - AI工具推荐
+    - Cursor 教程
+  keywords_douyin:
+    - Claude
+    - AI编程
+    - AI工具
+    - 程序员
+    - 开源项目
+    - vibecoding
+  niche_match_terms: [Claude, skill, Codex, AI工具, vibecoding, Agent, Cursor, 开源]
+
+screening:                         # 沿用全局默认，可覆盖
+  followers_min: 1000
+  followers_max: 10000
+  median_floor: 30
+
+notes: |
+  实测预设：藏赞比 1.29、点赞×26.5 反推播放等系数来自 AI 工具类目抽样。
+  换类目请勿直接套用——复制 generic.yaml 另建，首轮询价后校准。

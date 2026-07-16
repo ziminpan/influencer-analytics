@@ -1,0 +1,41 @@
+---
+title: "Influencer Analytics · Campaign Report"
+format: html
+execute: {echo: false, warning: false}
+---
+
+```{r setup}
+library(tidyverse)
+db <- read_csv("../data/db_cn.csv", show_col_types = FALSE)
+results <- read_csv("../data/results.csv", show_col_types = FALSE)
+snapshot_note <- paste("本报告基于数据快照：", Sys.Date())
+```
+
+`r snapshot_note`
+
+## 漏斗
+
+```{r funnel}
+db |> count(status) |> ggplot(aes(reorder(status, n), n)) +
+  geom_col() + coord_flip() + labs(x = NULL, y = "人数", title = "触达漏斗")
+```
+
+## 分档 CPM（仅报价样本 ≥3 的档位）
+
+```{r cpm}
+db |> filter(!is.na(cpm)) |>
+  mutate(tier = cut(followers, c(0, 1e4, 5e4, 2e5, Inf),
+                    labels = c("KOC", "初级", "腰部", "头部"))) |>
+  group_by(tier) |> filter(n() >= 3) |>
+  summarise(median_cpm = median(cpm), n = n()) |>
+  ggplot(aes(tier, median_cpm)) + geom_col() +
+  geom_text(aes(label = paste0("n=", n)), vjust = -0.4) +
+  labs(title = "分档中位 CPM", y = "CPM (元)")
+```
+
+## 互动分布与数据新鲜度
+
+```{r freshness}
+db |> mutate(stale = as.Date(collected_at) < Sys.Date() - 30) |>
+  count(stale) |> knitr::kable(col.names = c("采集超过30天", "行数"))
+```

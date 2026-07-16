@@ -1,0 +1,16 @@
+# generic 预设：空白脚手架。复制本文件为 presets/<你的项目>.yaml 后逐项填写。
+# 所有未填写的参数将回落到 config.yaml 的默认值。
+preset_name: generic
+product:
+  brand_name: ""          # 品牌/团队名，将替换话术里的 {{brand}}
+  repo_url: ""            # 推广对象（GitHub 仓库或产品页）
+  pitch_one_liner: ""     # 一句话卖点，将替换 {{product_pitch}}
+  kpi: []                 # 例: [github_stars, site_uv, 涨粉]
+discovery:
+  keywords_xiaohongshu: []   # 站内搜索词，每行一个
+  keywords_douyin: []
+  niche_match_terms: []      # 判断"内容匹配度"的关键词（出现在近期作品标题里）
+screening: {}                # 可覆盖 config 里的 followers_min/max、median_floor 等
+notes: |
+  未校准预设：本预设没有任何实测数据背书，系数与阈值均为 config 默认值，
+  首轮询价数据回来后请运行校准（calibrate.py）再做投放决策。
