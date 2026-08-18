@@ -28,21 +28,39 @@ def main(path, out, now=None):
     total = len(rows)
 
     # 漏斗
-    order = ["待触达", "已私信", "已回复", "已报价", "洽谈中", "待老板审批",
-             "已签约", "已发布", "婉拒/放弃", "无回应"]
+    # 与 schema/schema.md 的 status 取值表逐字一致。2026-08-17 修：此前这里写
+    # "婉拒/放弃"、schema 写"婉拒放弃"，差一个斜杠，真按 schema 填的行会被当成
+    # "非漏斗阶段"画到最下面。这个状态一直没人用过，所以不一致一直没暴露。
+    order = ["待触达", "已私信", "已回复", "已拒绝", "已报价", "洽谈中", "待老板审批",
+             "已签约", "已发布", "婉拒放弃", "无回应"]
     from collections import Counter
-    cnt = Counter(r.get("status", "") for r in rows)
-    funnel = "".join(bar_row(s, cnt.get(s, 0), total) for s in order if cnt.get(s))
+    cnt = Counter(r.get("status", "").strip() or "(status 未填)" for r in rows)
+    # order 之外的状态不能静默丢：海外线有"待审""备选·候选转放大器池"这类
+    # merge_seed.py 自己打出来的分档标记，旧写法会让报告头写"总库 23 人"、
+    # 漏斗只画出 15 人，差额没有任何提示，等于把 1/3 的库藏起来。
+    off_funnel = sorted((s for s in cnt if s not in order), key=lambda s: -cnt[s])
+    funnel = "".join(bar_row(s, cnt[s], total) for s in order if cnt.get(s))
+    funnel += "".join(bar_row(s, cnt[s], total, extra=" · 非漏斗阶段")
+                      for s in off_funnel)
 
     # 分档 CPM
-    cpm_pts = []
+    cpm_pts, unparsed = [], []
     for r in rows:
+        # int() 解析不了 "16000.0"（外部工具经 openpyxl 回写 CSV 会产生这种浮点串，
+        # 2026-08-12 在 db_intl.csv 上实际发生过 95 行）。走 float 再取整，两种写法都吃。
         try:
-            c = float(r["cpm"]); f = int(r["followers"])
+            c = float(r["cpm"]); f = int(float(r["followers"]))
             if c > 0 and f > 0:
                 cpm_pts.append((f, c))
-        except (ValueError, KeyError):
-            pass
+        except (ValueError, KeyError, TypeError):
+            # 原本这里是裸 pass：一旦某列格式漂移，每行都被静默丢掉，
+            # CPM 图会安静地变空而不报错。空值是正常的（大量候选没报价），
+            # 所以不能一有异常就喊——只统计**填了值却解析不了**的，最后提示。
+            if (r.get("cpm") or "").strip() and (r.get("followers") or "").strip():
+                unparsed.append(r.get("id", "?"))
+    if unparsed:
+        print(f"  ⚠ CPM 分档跳过 {len(unparsed)} 行：cpm/followers 填了值但解析不了"
+              f"（{', '.join(unparsed[:5])}{'…' if len(unparsed) > 5 else ''}）")
     cpm_html = ""
     for name, lo, hi in TIERS:
         vals = [c for f, c in cpm_pts if lo <= f < hi]

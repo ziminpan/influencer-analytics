@@ -1,12 +1,12 @@
 # influencer-analytics 配置样例。复制为 config.yaml 后按需修改。
 # 首次使用只需填写 product 段和选择一个 preset，其余可用默认值。
 
-market: cn                    # cn=国内(小红书/抖音) | intl=海外(v0.1未实现)
-preset: claude-skill          # presets/ 下的预设文件名（不含 .yaml）
+market: cn                    # cn=国内(小红书/抖音) | intl=海外(Collabstr/Instagram/X，2026-07-28上线)
+preset: claude-skill          # presets/ 下的预设文件名（不含 .yaml）；海外用 roadtrip-intl
 
 product:                      # 也可由预设提供；此处填写会覆盖预设
-  brand_name: ""              # 例: Waybox
-  repo_url: ""                # 例: github.com/Waybox-AI/roadtrip-skill
+  brand_name: ""              # 例: <公司>
+  repo_url: ""                # 例: github.com/<你的组织>/<产品仓库>
   pitch_one_liner: ""         # 一句话卖点，进话术 {{product_pitch}}
   kpi: []                     # 例: [github_stars, site_uv]
 
@@ -20,7 +20,12 @@ screening:                    # 硬性门槛（第 2 节）
   search_boosted_ratio: 0.5   # 中位≥粉丝×此值 → 标记搜索流型账号
 
 estimation:                   # 曝光/报价系数（第 8 节，均可被校准结果替换）
-  xhs_read_multiplier: 33
+  xhs_read_multiplier: 33     # 全局兜底值；有分档值时分档优先
+  # 2026-07-17 蒲公英官方对账分档校准（n=11，分档中位法；n≥20 且两档各≥5 后升级回归）：
+  xhs_read_multiplier_koc: 12       # ≤1.2万粉（对账比值中位 0.37）
+  xhs_read_multiplier_waist: 44     # ≥7万粉（对账比值中位 1.33，原系数反向低估）
+  xhs_tier_koc_max_followers: 12000
+  xhs_tier_waist_min_followers: 70000   # 1.2万~7万粉样本不足(n=1)，暂用全局值 33
   xhs_save_like_ratio_default: 1.29
   douyin_play_per_like: 26.5
   commercial_discount: 0.7

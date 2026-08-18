@@ -3,7 +3,7 @@
 preset_name: claude-skill
 product:
   brand_name: ""
-  repo_url: ""                     # 填你的 skill 仓库，如 github.com/Waybox-AI/roadtrip-skill
+  repo_url: ""                     # 填你的 skill 仓库，如 github.com/<你的组织>/<产品仓库>
   pitch_one_liner: ""
   repo_slug: ""                    # 话术里"GitHub 搜 xxx"的搜索词
   web_fallback: ""                 # 网页版兜底地址（评论区卡片用）

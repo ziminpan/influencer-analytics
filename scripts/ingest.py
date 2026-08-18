@@ -19,6 +19,16 @@ MACHINE_COLS = {
     "collected_at", "score_fit", "score_engagement", "score_audience",
     "score_content", "score_value", "score_total", "expected_exposure", "cpm",
     "profile_url", "official_reads_median",
+    # 2026-08-14 新增，发现层写入：source_keyword 是这个候选从哪个搜索词来的，
+    # niche_match_grade 是验证层给的垂类匹配档位。两者缺一，SKILL.md 的关键词
+    # 反馈闭环（verified_precision = (强匹配+中匹配) / 已判定人数）就算不出来——
+    # 只有来源词没有档位，分子拿不到；只有档位没有来源词，分不到词头上。
+    "source_keyword", "niche_match_grade",
+    # 2026-08-17 新增：受众地域。与 country 是两件事——country 是**博主**在哪
+    # （管时区结算），这一列是**受众**在哪（管这单值不值得做）。把前者当后者的
+    # 代理，是 2026-08-17 复盘查出来的系统性错误：三个注册地在美加的博主，
+    # 受众主体分别在俄语区、巴西和印度。
+    "audience_geo_top3", "audience_geo_source",
 }
 HUMAN_COLS = {
     "status", "first_contact_date", "last_followup_date", "quote_image",
@@ -113,7 +123,7 @@ def main(cand_path, csv_path):
                     row[k] = v
                 elif k in HUMAN_COLS and row.get(k) not in (None, "") and v not in (None, ""):
                     warnings.append(f"[提示] {key[1]}.{k}: 人类列已有值，保留 {row.get(k)!r}，忽略 {v!r}")
-            if c.get("log_append"):
+            if c.get("log_append") and c["log_append"] not in row.get("log_outreach", ""):
                 row["log_outreach"] = (row.get("log_outreach", "") + "；" + c["log_append"]).strip("；")
         else:                                  # 新增
             c["id"] = f"{prefix}-{next_num:03d}"; next_num += 1
@@ -124,7 +134,8 @@ def main(cand_path, csv_path):
             added.append(c["id"] + " " + c.get("name", ""))
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=header)
+        # 显式 "\n"：csv 默认 "\r\n" 会把整库行尾翻成 CRLF，一次入库产生全文件 diff
+        w = csv.DictWriter(f, fieldnames=header, lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 

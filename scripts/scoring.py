@@ -41,7 +41,8 @@ def main(path):
             row["score_total"] = s
             updated += 1
     with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=header)
+        # 显式 "\n"：csv 默认 "\r\n" 会把整库行尾翻成 CRLF，回填打分产生全文件 diff
+        w = csv.DictWriter(f, fieldnames=header, lineterminator="\n")
         w.writeheader(); w.writerows(rows)
     print(f"score_total 更新 {updated} 行")
     # 顺带列出"仅初筛分"的行（缺画像或性价比），提醒补数据
