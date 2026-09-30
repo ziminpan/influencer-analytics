@@ -28,7 +28,7 @@ EMPLOYER_BLOCK_END = "#/END-EMPLOYER" + "-SUBS"
 IDENTITY_STOP = {"instagram", "collabstr", "xiaohongshu", "douyin", "youtube",
                  "小红书", "抖音", "蒲公英", "待触达", "已报价", "淘汰"}
 
-# 显示名里的通用词。切词脱敏时必须排除，否则 `<账号75>` 会让
+# 显示名里的通用词。切词脱敏时必须排除，否则 `<账号80>` 会让
 # playbook 正文里每个 `Travel` 都变成代号。宁可对名字漏一两个（由 find_leaks 兜住），
 # 也不能把方法论正文替成筛子。
 NAME_NOISE = {
@@ -41,6 +41,9 @@ NAME_NOISE = {
     "World", "Global", "Wild", "Wildly", "Free", "Freedom", "Beyond",
     "Ontario", "Canada", "America", "States", "United", "North", "South",
     "East", "West",
+    # 项目内部术语，不是人名；2026-09-30 发现 find_freetext_names 把 notes 里
+    # "……name 列中不含真名，见 CHANGELOG v0.4.1 记录" 这句话的 CHANGELOG 当真名误判。
+    "CHANGELOG",
 }
 HANDLE_RE = re.compile(
     r"(?:instagram\.com|x\.com|twitter\.com|douyin\.com/user|xiaohongshu\.com/user/profile)"
@@ -107,11 +110,11 @@ def collect_identities():
             if g:
                 groups.append(g)
     # 把每个写法再切成词，把"像人名"的词也纳进同一组。
-    # 2026-08-18 事故：`name` 列存的是 `<handle> (<账号H> H)`，脱敏器把 `<账号H> H`
-    # 整串当成一个 token，而替换是字面子串匹配——playbook 里自然书写成 `<账号H>`，
+    # 2026-08-18 事故：`name` 列存的是 `<handle> (<账号M> H)`，脱敏器把 `<账号M> H`
+    # 整串当成一个 token，而替换是字面子串匹配——playbook 里自然书写成 `<账号M>`，
     # 匹配不上，于是真名连同她的报价一起进了导出物，而复验还打了 ✓（见 find_leaks 注释）。
-    # 漏的不是"只存在于 notes 的名字"，是**任何被截短成名的形式**：<账号N>→<账号N>、
-    # <账号61> Ol…→<账号61>、<账号75> | Travel…→<账号75> 全是同一个形态。
+    # 漏的不是"只存在于 notes 的名字"，是**任何被截短成名的形式**：<账号S>→<账号S>、
+    # <账号66> Ol…→<账号66>、<账号80> | Travel…→<账号80> 全是同一个形态。
     # 只收纯字母、首字母大写、≥4 字符且不在通用词表里的词——`Travel`/`Outdoors` 这类
     # 显示名里的通用词若也拿去替换，会把 playbook 正文里的普通英文一起替掉。
     for g in list(groups):

@@ -178,7 +178,7 @@ several tools I now use.
 I'd like to submit {{repo_slug}}: {{product_pitch}} It's MIT licensed and free.
 
 Happy to open a PR following your contribution format rather than asking you to
-do the work. <账号51> let me know if it fits the list's scope first.
+do the work. <账号56> let me know if it fits the list's scope first.
 
 {{sender_name}}
 ```

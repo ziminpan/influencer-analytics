@@ -37,7 +37,13 @@ COLMAP = {
     "编号": "id", "平台": "platform", "昵称": "name", "垂类": "niche",
     "粉丝数": "followers", "触达状态": "status", "起步价(USD)": "quote_image",
     "视频报价(USD)": "quote_video",
-    "报价说明": "quote_notes", "预期曝光": "expected_exposure",
+    "报价说明": "quote_notes",
+    # Collabstr 平台徽章（top / fast / top+fast / none）。2026-08-27 建列。
+    # 为什么必须成列而不写在备注里：它是**筛选判据**——「私信未回 + 邮件未回 + 无徽章 → 不合作」
+    # 要能机械跑，判据就不能埋在自由文本里。同一个毛病在 source_keyword 和 quote_source 上
+    # 各修过一次（信息埋在 notes 里，脚本读不出来，闭环从没跑过），第三次就说不过去了。
+    "交付信号": "delivery_signal",
+    "预期曝光": "expected_exposure",
     "拟投预算": "budget_planned", "预估CPM": "cpm", "老板审批": "approval",
     "国家": "country", "邮箱": "email", "备注": "notes",
     "主页链接": "profile_url", "沟通记录": "log_outreach",
@@ -185,14 +191,34 @@ def main():
         sys.exit(f"工作表首行找不到「{KEY_HEADER}」列，无法定位行")
 
     # 表里还没有的已知列/派生列。追加表头是改表结构，要显式 --add-columns 才做。
-    wanted = [h for h in list(COLMAP) + list(DERIVED) if h not in headers]
+    #
+    # **新列插在 COLMAP 声明的位置，不再追加到最右边**（2026-08-27 改）。
+    # 原来是 headers.append()，于是 `视频报价(USD)` 落在第 19 列、`人工核验发现` 之后，
+    # 而它在 COLMAP 里明明声明在 `起步价(USD)` 与 `报价说明` 之间——表结构和声明对不上，
+    # 看表的人得横拉过 11 列才能把两个报价放在一起看。
+    # 只改表结构不改这里，下次加列会复发同一个毛病（"修产物不修生成器"）。
+    ORDER = list(COLMAP) + list(DERIVED)          # 声明顺序 = 期望列序
+    wanted = [h for h in ORDER if h not in headers]
     if wanted:
         if a.add_columns:
             for h in wanted:
-                headers.append(h)
-                if a.write:
-                    ws.cell(row=1, column=len(headers), value=h)
-            print(f"  新增列：{'、'.join(wanted)}")
+                # 找该列在 ORDER 里的下一个「表中已存在」的列，插在它前面；
+                # 找不到（说明它该在末尾）就追加。
+                after = None
+                for nxt in ORDER[ORDER.index(h) + 1:]:
+                    if nxt in headers:
+                        after = headers.index(nxt) + 1
+                        break
+                if after is None:
+                    headers.append(h)
+                    if a.write:
+                        ws.cell(row=1, column=len(headers), value=h)
+                else:
+                    headers.insert(after - 1, h)
+                    if a.write:
+                        ws.insert_cols(after)
+                        ws.cell(row=1, column=after, value=h)
+            print(f"  新增列：{'、'.join(wanted)}（按 COLMAP 声明位置插入，非追加到末尾）")
         else:
             print(f"  ⓘ 表里缺 {len(wanted)} 个已知列（{'、'.join(wanted)}），"
                   f"本次不动表结构；要加请带 --add-columns")

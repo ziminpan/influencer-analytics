@@ -29,6 +29,8 @@ MACHINE_COLS = {
     # 代理，是 2026-08-17 复盘查出来的系统性错误：三个注册地在美加的博主，
     # 受众主体分别在俄语区、巴西和印度。
     "audience_geo_top3", "audience_geo_source",
+    # 每个无法填充的核心机器字段都必须在这里留结构化原因，禁止无解释空白。
+    "machine_gaps",
 }
 HUMAN_COLS = {
     "status", "first_contact_date", "last_followup_date", "quote_image",
@@ -97,10 +99,15 @@ def audit_median(c, warnings):
 
 
 def main(cand_path, csv_path):
-    cands = json.load(open(cand_path, encoding="utf-8"))
+    with open(cand_path, encoding="utf-8") as handle:
+        cands = json.load(handle)
     header, rows = load(csv_path)
     if not header:
         sys.exit(f"目标 CSV 缺表头: {csv_path}")
+    if "machine_gaps" not in header:
+        header.append("machine_gaps")
+        for row in rows:
+            row["machine_gaps"] = ""
     index = {(r["platform"], r["name"]): r for r in rows}
 
     added, refreshed, warnings = [], [], []

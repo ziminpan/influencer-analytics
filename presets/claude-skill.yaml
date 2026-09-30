@@ -3,11 +3,31 @@
 preset_name: claude-skill
 product:
   brand_name: ""
-  repo_url: ""                     # 填你的 skill 仓库，如 github.com/<你的组织>/<产品仓库>
+  repo_url: ""
   pitch_one_liner: ""
   repo_slug: ""                    # 话术里"GitHub 搜 xxx"的搜索词
-  web_fallback: ""                 # 网页版兜底地址（评论区卡片用）
-  kpi: [github_stars, github_uv]
+  web_fallback: ""
+  kpi: [github_stars, github_uv, site_uv]
+
+  # ⚠ 2026-08-18 立。起因：R2 策划初稿把 roadtrip-intl.yaml 的 feature_pitch 直接搬来用，
+  # 而那份写的是 Recreation.gov / ReserveCalifornia / Parks Canada —— 全是北美预订系统，
+  # 国内线根本不适用。国内线此前没有自己的功能口径，这是一个真实的洞（intl 线 08-11
+  # 因编造功能被抓过一次才补的口径，国内线一直没补）。以下为维护者 2026-08-18 口述确认。
+  feature_pitch_cn: >
+    地图展示、逐日路线、预算、跳转携程订、电车充电走廊、沿途小 tips；
+    并且**行程生成后可以按天逐日编辑**（comment 功能），不满意的那一天单独改，
+    不用整份重新生成。
+  # 差异化重点：逐日可编辑。多数 AI 行程工具只能重新 prompt 生成一版，
+  # 「能改哪一天」和「再问一次」是两种完全不同的承诺，文案里必须说准。
+  feature_key_differentiator_cn: "逐日可编辑（comment 功能），不是重新生成"
+  feature_honesty_boundary_cn: >
+    国内线**不具备** intl 线那套能力，写文案时一律不许出现：
+    营地/许可预订倒计时、Recreation.gov / ReserveCalifornia / Parks Canada 等官方预订系统对接、
+    实时封路提醒、实时油价电价、实时桩位占用、分钟级路况、逐向导航。
+    住宿与门票是**跳转携程**，不是我们代订。
+  # 受众抗拒点（R1 评论区实测）：大多数人关心的是 AI 幻觉、不可靠、缺乏验证，
+  # 而不是"能不能一句话生成"。因此钩子打「可核对 + 可修正」，不打生成速度与省事。
+  audience_objection_cn: "AI 会编 / 不可靠 / 没法验证"
 
 discovery:
   keywords_xiaohongshu:

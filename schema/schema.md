@@ -30,6 +30,7 @@
 | traffic_type | str | 机器 | fan_based / search_boosted |
 | data_confidence | str | 机器 | high / low（登出桶值、样本过少自动置 low） |
 | collected_at | date | 机器 | 采集日期，报告据此算新鲜度 |
+| machine_gaps | str | 机器 | 无法填充的机器字段及原因，格式 `字段:reason_code|字段:reason_code`；只能使用英文 snake_case 原因码。核心机器字段必须“有值或有原因”二选一，禁止无解释空白 |
 | score_fit / score_engagement / score_audience / score_content / score_value | int | 机器 | 五维分，缺的留空 |
 | score_total | float | 机器 | 按可用维度归一化 |
 | status | str | 人类 | **漏斗阶段**：待触达/已私信/已回复/**已拒绝**/已报价/洽谈中/待老板审批/已签约/已发布/婉拒放弃/无回应。`已拒绝`=对方明确谢绝（2026-08-17 起用），与 `婉拒放弃` 分开：前者是对方关了门、后续动作只剩换品类或换时机，后者含「我们主动放弃」，两者后续动作不同，不该共用一个值。取值须与 `report_html.py` 的 order 列表逐字一致；**筛选结论态**：淘汰。`roadtrip-intl` 采用 direction-only：只有垂类/目标地域明确不符才淘汰，其余用待触达；待审/备选/观察/放大器池为待迁移的历史状态，风险应写 `approval/notes` |
@@ -182,4 +183,5 @@ posts_30d→近30天条数, median_engagement→中位赞藏/播放, status→�
 quote_image→图文报价, quote_video→视频报价, expected_exposure→预期曝光,
 budget_planned→拟投预算, cpm→预估CPM, approval→老板审批, notes→备注,
 profile_url→主页链接, log_outreach→沟通记录
-（score_* 及 raw_samples/engagement_basis 等诊断列导出时可隐藏）
+（score_* 及 raw_samples/engagement_basis 等诊断列导出时可隐藏；`collected_at` 和
+`machine_gaps` 必须导出为「资料采集日」「机器缺口原因」，不得只埋在备注里）

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -17,6 +18,23 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 URL_FIELDS = ("profile_url", "instagram_url", "collabstr_url")
+REQUIRED_MACHINE_FIELDS = (
+    "platform",
+    "name",
+    "followers",
+    "posts_30d",
+    "median_engagement",
+    "engagement_basis",
+    "raw_samples",
+    "traffic_type",
+    "data_confidence",
+    "score_fit",
+    "score_engagement",
+    "score_content",
+    "source_keyword",
+    "niche_match_grade",
+)
+GAP_REASON_PATTERN = re.compile(r"^[a-z0-9_]+$")
 
 
 def normalize_url(value: str) -> str:
@@ -34,6 +52,63 @@ def record_url(record: dict) -> str:
         if normalized:
             return normalized
     return ""
+
+
+def parse_machine_gaps(value: object) -> tuple[dict[str, str], list[str]]:
+    """Parse ``field:reason_code|field:reason_code`` without accepting prose."""
+    raw = str(value or "").strip()
+    if not raw:
+        return {}, []
+
+    gaps: dict[str, str] = {}
+    malformed: list[str] = []
+    for entry in raw.split("|"):
+        entry = entry.strip()
+        if not entry or ":" not in entry:
+            malformed.append(entry or "<blank>")
+            continue
+        field, reason = (part.strip() for part in entry.split(":", 1))
+        if not field or not GAP_REASON_PATTERN.fullmatch(reason):
+            malformed.append(entry)
+            continue
+        gaps[field] = reason
+    return gaps, malformed
+
+
+def validate_machine_completeness(record: dict, row_number: int) -> tuple[list[str], list[str]]:
+    """Require every core machine field to have a value or an explicit gap reason."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    gaps, malformed = parse_machine_gaps(record.get("machine_gaps"))
+
+    if malformed:
+        errors.append(f"checkpoint row {row_number} malformed machine_gaps: {malformed}")
+
+    required = list(REQUIRED_MACHINE_FIELDS)
+    if record.get("median_engagement") not in (None, "") or record.get("official_reads_median") not in (None, ""):
+        required.append("expected_exposure")
+    if any(record.get(field) not in (None, "") for field in (
+        "score_fit", "score_engagement", "score_audience", "score_content", "score_value"
+    )):
+        required.append("score_total")
+    if (
+        any(record.get(field) not in (None, "") for field in ("quote_image", "quote_video"))
+        and record.get("expected_exposure") not in (None, "")
+    ):
+        required.append("score_value")
+
+    for field in required:
+        if record.get(field) in (None, "") and field not in gaps:
+            errors.append(
+                f"checkpoint row {row_number} missing machine field {field} without machine_gaps reason"
+            )
+
+    for field in sorted(gaps):
+        if record.get(field) not in (None, ""):
+            warnings.append(
+                f"checkpoint row {row_number} has value and machine_gaps reason for {field}"
+            )
+    return errors, warnings
 
 
 def validate(checkpoint: Path, database: Path, expected: int, summary: Path | None) -> dict:
@@ -63,6 +138,11 @@ def validate(checkpoint: Path, database: Path, expected: int, summary: Path | No
     missing_dates = [index + 1 for index, record in enumerate(records) if not record.get("collected_at")]
     if missing_dates:
         errors.append(f"checkpoint rows missing collected_at: {missing_dates}")
+
+    for index, record in enumerate(records, start=1):
+        machine_errors, machine_warnings = validate_machine_completeness(record, index)
+        errors.extend(machine_errors)
+        warnings.extend(machine_warnings)
 
     try:
         with database.open("r", encoding="utf-8-sig", newline="") as handle:

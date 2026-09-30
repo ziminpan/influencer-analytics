@@ -67,6 +67,11 @@ SENDABLE_STATUS = {"待触达", "已私信"}
 # 2026-08-18 实测代价：对方 00:05 发来完整方案与档期，我方 10:03 回「还没有 brief」，
 # 10:14 才抓收件箱。同一线程里那两封挨在一起读起来是婉拒，而邮件发出不可撤回。
 IN_CONVERSATION = {"已回复", "洽谈中", "待老板审批", "已报价"}
+
+# 已经关门的状态。跟进信绝不能发给这些人：他们不是"没回"，是回了并且说了不。
+# 白名单式判断在这里不适用——跟进的实质判据是"发过、没回、够久"，
+# 而"回了且说不"必须单独挡住，否则会被当成未回信者再骚扰一次。
+DECLINED_STATUS = {"已拒绝", "婉拒放弃", "淘汰"}
 INBOX_STALE_SECONDS = 30 * 60      # 收件箱抓取超过这个时长即视为过期
 
 
@@ -83,13 +88,15 @@ def parse_drafts(path):
         m = re.match(r"^##\s+(INTL-\d+|CN-\d+)\s*·\s*(.*)$", line.strip())
         if m:
             cur = {"id": m.group(1), "name": m.group(2).strip(),
-                   "to": None, "subject": None, "body": None}
+                   "to": None, "subject": None, "body": None, "cc": None}
             out[cur["id"]] = cur
             i += 1
             continue
         if cur:
             if line.startswith("To:") and cur["to"] is None:
                 cur["to"] = line[3:].strip()
+            elif line.startswith("Cc:") and cur["cc"] is None:
+                cur["cc"] = line[3:].strip()
             elif line.startswith("Subject:") and cur["subject"] is None:
                 cur["subject"] = line[8:].strip()
             elif line.strip().startswith("```") and cur["body"] is None:
@@ -107,9 +114,24 @@ def parse_drafts(path):
 
 
 def token_of(draft):
-    """确认令牌 = 收件人 + 标题 + 正文 的哈希。任一字变化则令牌变化。"""
-    raw = f"{draft['to']}\n{draft['subject']}\n{draft['body']}".encode("utf-8")
+    """确认令牌 = 收件人 + 抄送 + 标题 + 正文 的哈希。任一字变化则令牌变化。"""
+    raw = (f"{draft['to']}\n{draft.get('cc') or ''}\n"
+           f"{draft['subject']}\n{draft['body']}").encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:12]
+
+
+def apply_default_cc(drafts, preset):
+    """草稿没写 Cc 时，落回 preset 的 outreach.default_cc（没配就什么都不做）。
+
+    必须在 token_of 第一次被调用之前执行——抄送要参与令牌哈希，
+    落回值来得晚，人看到的令牌就和实际发出的抄送对不上。
+    """
+    default_cc = (preset.get("outreach", {}) or {}).get("default_cc")
+    if not default_cc:
+        return
+    for d in drafts.values():
+        if not d.get("cc"):
+            d["cc"] = default_cc
 
 
 def body_sha(draft):
@@ -229,6 +251,8 @@ def preflight(draft, preset, db, audit, today):
 
 def cmd_list(args):
     drafts = parse_drafts(args.drafts)
+    preset = yaml.safe_load(open(args.preset, encoding="utf-8"))
+    apply_default_cc(drafts, preset)
     audit = read_audit()
     done = {r["id"] for r in live_sends(audit)}
     print(f"草稿文件：{args.drafts}　共 {len(drafts)} 份\n")
@@ -249,6 +273,7 @@ def cmd_preview(args):
     drafts = parse_drafts(args.drafts)
     d = drafts.get(args.id) or sys.exit(f"草稿里没有 {args.id}")
     preset = yaml.safe_load(open(args.preset, encoding="utf-8"))
+    apply_default_cc(drafts, preset)
     db = load_db(args.db)
     audit = read_audit()
     today = datetime.date.today().isoformat()
@@ -257,22 +282,40 @@ def cmd_preview(args):
     print("=" * 72)
     print(f"From:    {formataddr((sender['sender_display'], sender['sender_email']))}")
     print(f"To:      {d['to']}")
+    if d.get("cc"):
+        print(f"Cc:      {d['cc']}")
     print(f"Subject: {d['subject']}")
     print("-" * 72)
     print(d["body"])
     print("=" * 72)
-    blocks = preflight(d, preset, db, audit, today)
+    # 该走哪条路径由事实决定，不由人记：有入站回信→reply；发过且没回→followup；
+    # 都不是→send。上一版一律印 send，于是对已发过的人 preview 会印出一条注定被
+    # 「同一 id 不可重发」拒掉的命令（2026-08-19 连撞两次），照抄的人只会以为发不了。
+    inbound = inbound_of(d["id"])
+    prev = last_live_send(audit, d["id"])
+    if inbound is not None:
+        route, why = "reply", f"对方有入站回信（{inbound.get('date', '')[:22]}）→ 挂原会话"
+        blocks = preflight_reply(d, preset, db, audit, inbound)
+    elif prev is not None:
+        route, why = "followup", f"已发过（{prev['ts'][:10]}）且对方未回 → 跟进信"
+        blocks = preflight_followup(d, preset, db, audit, today)
+    else:
+        route, why = "send", "未发过 → 首封冷邮件"
+        blocks = preflight(d, preset, db, audit, today)
+
+    print(f"\n路径判定：**{route}**（{why}）")
     if blocks:
-        print("\n✗ 当前会被拒发：")
+        print("✗ 当前会被拒发：")
         for b in blocks:
             print(f"   - {b}")
     else:
         cap = preset["pacing"]["daily_email_cap"]
-        print(f"\n✓ 护栏检查通过（今日 {len(sent_today(audit, today))}/{cap}）")
+        occupies = "不占冷发额度" if route == "reply" else "占冷发额度"
+        print(f"✓ 护栏检查通过（{occupies}；今日 {len(sent_today(audit, today))}/{cap}）")
     # 提示命令用 python3：macOS 上 `python` 通常不存在，照抄会直接失败。
     # 整行必须是可以原样粘贴的一整条命令——上一版拆成两行导致过复制错误。
     print(f"\n这就是将要发出的全文。确认无误后，把下面**整整一行**粘贴执行：")
-    print(f"\npython3 scripts/outreach_send.py send --drafts {args.drafts} "
+    print(f"\npython3 scripts/outreach_send.py {route} --drafts {args.drafts} "
           f"--id {d['id']} --confirm {token_of(d)} --live\n")
     print(f"（想先演练就把结尾的 --live 去掉。--confirm 后面只跟令牌 "
           f"{token_of(d)}，不要跟别的东西。）")
@@ -303,6 +346,7 @@ def cmd_send(args):
     drafts = parse_drafts(args.drafts)
     d = drafts.get(args.id) or sys.exit(f"草稿里没有 {args.id}")
     preset = yaml.safe_load(open(args.preset, encoding="utf-8"))
+    apply_default_cc(drafts, preset)
     db = load_db(args.db)
     audit = read_audit()
     today = datetime.date.today().isoformat()
@@ -336,6 +380,8 @@ def cmd_send(args):
     msg = EmailMessage()
     msg["From"] = formataddr((sender["sender_display"], sender["sender_email"]))
     msg["To"] = d["to"]
+    if d.get("cc"):
+        msg["Cc"] = d["cc"]
     msg["Subject"] = d["subject"]
     # 自己生成 Message-ID 再发：不设的话由服务器生成，客户端拿不到，
     # 审计日志里那一栏就是空的——等于无法把一条审计记录和已发信箱里的实信、
@@ -344,7 +390,7 @@ def cmd_send(args):
     msg.set_content(d["body"])
 
     rec = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
-           "id": d["id"], "name": d["name"], "to": d["to"],
+           "id": d["id"], "name": d["name"], "to": d["to"], "cc": d.get("cc"),
            "subject": d["subject"], "body_sha256": body_sha(d),
            "confirm_token": expected, "from": sender["sender_email"],
            "confirmed_by": args.confirmed_by,
@@ -493,6 +539,7 @@ def cmd_reply(args):
     drafts = parse_drafts(args.drafts)
     d = drafts.get(args.id) or sys.exit(f"草稿里没有 {args.id}")
     preset = yaml.safe_load(open(args.preset, encoding="utf-8"))
+    apply_default_cc(drafts, preset)
     db = load_db(args.db)
     audit = read_audit()
     today = datetime.date.today().isoformat()
@@ -507,6 +554,8 @@ def cmd_reply(args):
     print("=" * 72)
     print(f"From:    {formataddr((sender['sender_display'], sender['sender_email']))}")
     print(f"To:      {d['to']}")
+    if d.get("cc"):
+        print(f"Cc:      {d['cc']}")
     print(f"Subject: {d['subject']}")
     if inbound:
         print(f"挂在会话中: In-Reply-To {inbound['message_id'][:44]}…（{inbound['subject'][:40]}）")
@@ -522,6 +571,8 @@ def cmd_reply(args):
     msg = EmailMessage()
     msg["From"] = formataddr((sender["sender_display"], sender["sender_email"]))
     msg["To"] = d["to"]
+    if d.get("cc"):
+        msg["Cc"] = d["cc"]
     msg["Subject"] = d["subject"]
     msg["Message-ID"] = make_msgid(domain=sender["sender_email"].split("@")[-1])
     # 挂进原会话：不设这两个头，回信会另起一个线程，对方看着像新邮件
@@ -530,7 +581,8 @@ def cmd_reply(args):
     msg.set_content(d["body"])
 
     rec = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
-           "id": d["id"], "name": d["name"], "to": d["to"], "subject": d["subject"],
+           "id": d["id"], "name": d["name"], "to": d["to"], "cc": d.get("cc"),
+           "subject": d["subject"],
            "body_sha256": body_sha(d), "confirm_token": expected,
            "from": sender["sender_email"], "confirmed_by": args.confirmed_by,
            "kind": "reply", "in_reply_to": inbound["message_id"],
@@ -567,6 +619,179 @@ def cmd_reply(args):
                             f"已回复对方询问（冷邮件线程内）：{d['subject']}")
     print(f"  已追加 log_outreach。**status 未自动推进**——"
           f"「已回复」指对方回了我们；要不要转「洽谈中」由人判断。")
+    return 0
+
+
+FOLLOWUP_MIN_DAYS = 7      # 距上封实发的最小间隔。不可绕过——它就是这条路径的全部意义。
+
+
+def last_live_send(audit, cid):
+    """该候选最近一次**实发**记录（含 reply/followup），没有返回 None。"""
+    mine = [r for r in live_sends(audit) if r["id"] == cid]
+    return sorted(mine, key=lambda r: r.get("ts", ""))[-1] if mine else None
+
+
+def preflight_followup(draft, preset, db, audit, today):
+    """给**未回信者**的跟进信护栏。为什么单开一条路径，逐条说明：
+
+    冷发路径有一条「同一 id 不可重发」。它防的是同一封信被发两遍，但它同时把
+    「给没回信的人发一封内容不同的跟进信」也拦死了——那是它要防的东西之外的正当动作。
+    2026-08-19 实际撞上：15 个未回信者的硬件线跟进信被全部拒发。
+    删掉那条规则是错的（它挡住过真的重复发送），所以照 reply 的做法**换判据**：
+
+    - **必须已经发过**：没发过第一封就不存在"跟进"。这种情况该走 send。
+    - **必须没有入站回信**：对方回过信就不是"未回信者"，该走 reply 挂原会话；
+      在人家回过的情况下另起一封冷邮件，是最容易得罪人的一种发法。
+    - **距上封 ≥ FOLLOWUP_MIN_DAYS 天**：间隔是这条路径唯一的实质约束。
+      没有它，「跟进」就是「同一个人想发几封发几封」的合法化通道。
+    - **正文必须不同**：同一份正文再发一次就是重复发送，那正是原规则要防的东西。
+    - **日上限照旧计入**：跟进信没有入站信作凭据，收信人视角与冷邮件无异，
+      承担同样的投递与投诉风险。reply 可以不占额度，跟进信不行。
+    - status 不再要求在 SENDABLE_STATUS 内：`已私信` 本来就在里面，真正的判据是
+      上面那四条（发过、没回、够久、正文不同），比看状态字面更贴近实质。
+      但**已明确谢绝的人要挡住**——那不是"未回信"，是回过了且说了不。
+    - 域名门禁与急停开关照旧保留。
+    """
+    blocks = []
+    sender = preset.get("outreach", {}).get("sender", {})
+    if not sender.get("domain_auth_verified"):
+        blocks.append("preset 的 domain_auth_verified 不为 true——发信域门禁未解除")
+    if os.path.exists(HALT_FILE):
+        blocks.append(f"急停开关已置位（{os.path.relpath(HALT_FILE, ROOT)} 存在）→ 先 resume")
+
+    cap = preset.get("pacing", {}).get("daily_email_cap")
+    if cap is None:
+        blocks.append("preset 未配 pacing.daily_email_cap——上限未定义时拒发")
+    else:
+        n = len(sent_today(audit, today))
+        if n >= cap:
+            blocks.append(f"今日实发 {n} 封已达上限 {cap}（跟进信计入冷发额度）")
+
+    row = db.get(draft["id"])
+    if row is None:
+        blocks.append(f"{draft['id']} 不在库里")
+    else:
+        db_mail = (row.get("email") or "").strip().lower()
+        if db_mail and db_mail != parseaddr(draft["to"])[1].strip().lower():
+            blocks.append(f"草稿收件人 {draft['to']} 与库内 email {row['email']} 不一致")
+        if (row.get("status") or "").strip() in DECLINED_STATUS:
+            blocks.append(f"{draft['id']} 状态是「{row.get('status')}」——对方已明确谢绝，"
+                          f"不是未回信者。要另起话题请人工判断后走 reply 挂原会话")
+
+    inbound = inbound_of(draft["id"])
+    if inbound is not None:
+        blocks.append(f"{draft['id']} 有入站回信（{inbound.get('date', '')[:22]}）"
+                      f"——不是未回信者，该走 reply 挂原会话，别另起冷邮件")
+
+    prev = last_live_send(audit, draft["id"])
+    if prev is None:
+        blocks.append(f"{draft['id']} 没有任何实发记录——不存在「跟进」，第一封请走 send")
+    else:
+        if prev.get("body_sha256") == body_sha(draft):
+            blocks.append(f"正文与上封（{prev['ts']}）完全相同——那是重复发送，不是跟进")
+        try:
+            gap = (datetime.date.fromisoformat(today)
+                   - datetime.date.fromisoformat(prev["ts"][:10])).days
+            if gap < FOLLOWUP_MIN_DAYS:
+                blocks.append(f"距上封实发（{prev['ts'][:10]}）只有 {gap} 天，"
+                              f"不足 {FOLLOWUP_MIN_DAYS} 天。这个间隔不可绕过")
+        except ValueError:
+            blocks.append(f"上封实发时间戳无法解析（{prev.get('ts')!r}）——间隔算不出来，拒发")
+    return blocks
+
+
+def cmd_followup(args):
+    """给未回信者发跟进信。与 send 的唯一区别是护栏换成 preflight_followup。"""
+    drafts = parse_drafts(args.drafts)
+    d = drafts.get(args.id) or sys.exit(f"草稿里没有 {args.id}")
+    preset = yaml.safe_load(open(args.preset, encoding="utf-8"))
+    apply_default_cc(drafts, preset)
+    db = load_db(args.db)
+    audit = read_audit()
+    today = datetime.date.today().isoformat()
+    sender = preset["outreach"]["sender"]
+
+    expected = token_of(d)
+    if args.confirm != expected:
+        sys.exit(f"✗ 令牌不匹配：你给的是 {args.confirm}，当前草稿是 {expected}。\n"
+                 f"  请重新 preview 看一遍全文再发。")
+    if args.confirmed_by == "chat":
+        print("ⓘ 确认方式：对话确认（confirmed_by=chat）。令牌由代理代传，"
+              "只保证文件未被改动，不构成「人已阅读」的机械证明。")
+
+    print("=" * 72)
+    print(f"From:    {formataddr((sender['sender_display'], sender['sender_email']))}")
+    print(f"To:      {d['to']}")
+    if d.get("cc"):
+        print(f"Cc:      {d['cc']}")
+    print(f"Subject: {d['subject']}")
+    prev = last_live_send(audit, d["id"])
+    if prev:
+        print(f"上一封实发: {prev['ts'][:10]}《{prev.get('subject', '')[:44]}》")
+    print("=" * 72)
+
+    blocks = preflight_followup(d, preset, db, audit, today)
+    if blocks:
+        print("✗ 护栏拒发：")
+        for b in blocks:
+            print(f"   - {b}")
+        return 1
+    cap = preset["pacing"]["daily_email_cap"]
+    print(f"✓ 护栏通过（跟进信占冷发额度：今日 {len(sent_today(audit, today))}/{cap}）")
+
+    msg = EmailMessage()
+    msg["From"] = formataddr((sender["sender_display"], sender["sender_email"]))
+    msg["To"] = d["to"]
+    if d.get("cc"):
+        msg["Cc"] = d["cc"]
+    msg["Subject"] = d["subject"]
+    msg["Message-ID"] = make_msgid(domain=sender["sender_email"].split("@")[-1])
+    # 刻意**不设** In-Reply-To：对方没回过信，没有可挂的会话。把跟进信伪装成
+    # 回复，在对方收件箱里会变成一个他从没参与过的"线程"，比另起一封更可疑。
+    msg.set_content(d["body"])
+
+    rec = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
+           "id": d["id"], "name": d["name"], "to": d["to"], "cc": d.get("cc"),
+           "subject": d["subject"],
+           "body_sha256": body_sha(d), "confirm_token": expected,
+           "from": sender["sender_email"], "confirmed_by": args.confirmed_by,
+           "kind": "followup", "prev_ts": (prev or {}).get("ts", ""),
+           "mode": "live" if args.live else "dry"}
+
+    if not args.live:
+        print("\n— 演练（未连接 SMTP）—")
+        print(f"  会发给 {d['to']}，标题《{d['subject']}》，正文 {len(d['body'])} 字符")
+        print(f"  正文 sha256 前 16 位：{rec['body_sha256'][:16]}")
+        append_audit(rec)
+        return 0
+
+    pwd, pwd_src = read_password(preset)
+    if not pwd:
+        sys.exit("✗ 没找到 SMTP 口令。跑 outreach_send.py set-password")
+    smtp = preset.get("outreach", {}).get("smtp") or {}
+    host, port = smtp.get("host"), smtp.get("port")
+    if not host or not port:
+        sys.exit("✗ preset 缺 outreach.smtp.host / port")
+    ctx = ssl.create_default_context()
+    if str(smtp.get("security", "ssl")).lower() == "starttls":
+        with smtplib.SMTP(host, port) as s:
+            s.starttls(context=ctx); s.login(sender["sender_email"], pwd); s.send_message(msg)
+    else:
+        with smtplib.SMTP_SSL(host, port, context=ctx) as s:
+            s.login(sender["sender_email"], pwd); s.send_message(msg)
+    rec["smtp_message_id"] = msg.get("Message-ID", "")
+    rec["smtp_host"] = f"{host}:{port}"
+    rec["password_source"] = pwd_src
+    append_audit(rec)
+    print(f"\n✓ 跟进信已发送 {d['id']} → {d['to']}")
+    print(f"  已写入审计日志：{os.path.relpath(AUDIT_LOG, ROOT)}")
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import outreach_batch
+    outreach_batch.log_note(args.db, [d["id"]], today,
+                            f"跟进信已发（未回信者，非回复）：{d['subject']}")
+    print("  已追加 log_outreach。**status 未推进**——跟进不改变漏斗阶段，"
+          "对方回了才推进。")
     return 0
 
 
@@ -664,8 +889,8 @@ def main():
         p.add_argument("--drafts", required=True)
         if name not in ("list", "next"):
             p.add_argument("--id", required=True)
+        p.add_argument("--preset", default=os.path.join(ROOT, "presets/roadtrip-intl.yaml"))
         if name != "list":
-            p.add_argument("--preset", default=os.path.join(ROOT, "presets/roadtrip-intl.yaml"))
             p.add_argument("--db", default=os.path.join(ROOT, "data/db_intl.csv"))
         if name == "send":
             p.add_argument("--confirm", required=True, help="preview 打印的令牌")
@@ -686,6 +911,16 @@ def main():
     rp.add_argument("--preset", default=os.path.join(ROOT, "presets/roadtrip-intl.yaml"))
     rp.add_argument("--db", default=os.path.join(ROOT, "data/db_intl.csv"))
 
+    fu = sub.add_parser("followup", help="给未回信者发跟进信（占冷发额度，间隔 ≥7 天）")
+    fu.add_argument("--drafts", required=True)
+    fu.add_argument("--id", required=True)
+    fu.add_argument("--confirm", required=True)
+    fu.add_argument("--live", action="store_true")
+    fu.add_argument("--confirmed-by", choices=["human", "chat"], default="human",
+                    dest="confirmed_by")
+    fu.add_argument("--preset", default=os.path.join(ROOT, "presets/roadtrip-intl.yaml"))
+    fu.add_argument("--db", default=os.path.join(ROOT, "data/db_intl.csv"))
+
     for nm in ("set-password", "check-smtp"):
         q = sub.add_parser(nm)
         q.add_argument("--preset", default=os.path.join(ROOT, "presets/roadtrip-intl.yaml"))
@@ -696,7 +931,8 @@ def main():
     a = ap.parse_args()
     return {"list": cmd_list, "preview": cmd_preview, "send": cmd_send,
             "next": cmd_next, "halt": cmd_halt, "resume": cmd_resume,
-            "log": cmd_log, "reply": cmd_reply, "set-password": cmd_set_password,
+            "log": cmd_log, "reply": cmd_reply, "followup": cmd_followup,
+            "set-password": cmd_set_password,
             "check-smtp": cmd_check_smtp}[a.cmd](a) or 0
 
 

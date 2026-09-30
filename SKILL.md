@@ -14,13 +14,18 @@ description: >-
   awesome 列表上榜/分发渠道池, asks to 跑健康检查/哨兵测试 (sentinel sanity check), or asks to
   repair a broken collection playbook (采集失效/选择器失效).
 metadata:
-  version: v0.4.3          # 唯一的版本锚点，须与 CHANGELOG 最新条目一致。
+  version: v0.5.0          # 唯一的版本锚点，须与 CHANGELOG 最新条目一致。
                            # 发版时改这里；export_template.py 会在导出时比对并告警。
                            # （version 不能放 frontmatter 顶层——校验器只允许
                            #   name/description/license/allowed-tools/metadata/compatibility）
 ---
 
 # Influencer Analytics（达人建联与数据分析）
+
+## 小红书专用入口（v0.5.0，2026-09-16）
+
+**平台分流先于下文旧通用规则**：当任务包含小红书/蒲公英，必须先读 `docs/xhs-precision.md`，按该文执行并使用 `scripts/xhs_review.py`；其内容核验、统一候选池、评分证据、独立可选询价MD规则覆盖下文对小红书的旧标题命中、画像预估、边缘候选、旧评分/导表规则。只处理用户明确的平台。抖音和海外继续下文原流程，不加载小红书preset，不应用蒲公英功能。国内RoadTrip小红书任务使用 `presets/roadtrip-xhs.yaml`，不要套 claude-skill 的AI关键词。截图任务可离线处理并明确证据层级。
+
 
 把「找博主 → 数据核验 → 建库 → 触达 → 报价评估 → 校准 → 复盘」做成一条可重复的流水线。
 核心信条：**中位数不信爆款、口径永远随数字、机器不碰人类的列、发送永远由人来点。**
@@ -357,13 +362,23 @@ python scripts/validate_collection_run.py \
 ```
 
 只有检查点数量正确、URL 无重复、全部目标能在数据库中匹配、总结时间不早于最后检查点时，
-才允许报告“完成”。另一个会话可以只读监控这些文件，但不得把“能看到文件变化”误称为
+且每个核心机器字段都满足“有值或 `machine_gaps` 有结构化原因”时，才允许报告“完成”。
+核心字段包括：followers、posts_30d、median_engagement、engagement_basis、raw_samples、
+traffic_type、data_confidence、score_fit、score_engagement、score_content、source_keyword、
+niche_match_grade；有互动中位或官方阅读时还必须补 expected_exposure，有任一分项分时必须补
+归一化后的 score_total，有报价且有预期曝光时必须补 score_value。缺口格式固定为
+`字段:reason_code|字段:reason_code`，例如
+`median_engagement:not_enough_visible_posts|score_engagement:not_enough_visible_posts`。
+“之后再补”“页面没显示”不能只写在 notes 里；必须落到该列，校验器才会放行。
+
+另一个会话可以只读监控这些文件，但不得把“能看到文件变化”误称为
 能读取桌面端实时聊天记录。
 
 ## 7. 字段所有权（ingest.py 强制执行）
 
 - **机器列**（采集与计算类：followers、median_engagement、raw_samples、score_*、
-  expected_exposure、cpm 等）：脚本可刷新，刷新时在轮次总结中报告变化。
+  expected_exposure、cpm、collected_at、machine_gaps 等）：脚本可刷新，刷新时在轮次总结中
+  报告变化。运营 xlsx 必须把 `collected_at` 和 `machine_gaps` 导出成独立列，不得只埋在备注。
 - **人类列**（status、报价、budget_planned、approval、notes、日期）：脚本**永不覆盖**，
   冲突时警告并保留人类值。
 - **log_outreach**：追加式，双方都只许追加。
@@ -373,6 +388,8 @@ python scripts/validate_collection_run.py \
   **只从「待触达」推进到「已私信」**（后段状态一律不动并告警，防止把「已回复」倒退回
   「已私信」这种毁数据操作）；**`first_contact_date` 只在为空时填，永不覆盖**。
   其余人类列（`quote_*`、`approval`、`notes`、`last_followup_date`）仍然永不代写。
+  **计划触达日不等于首次触达日**：计划日期只能放触达清单；只有人工确实发送后，
+  `mark-sent` 才能写 `first_contact_date`。资料采集日只写 `collected_at`。
 
 ### 运营管理表 xlsx 是视图，不是第二份真相
 
@@ -470,6 +487,24 @@ python scripts/validate_collection_run.py \
   互动分布、数据新鲜度告警——`collected_at` 超 30 天的行标"待复核"）。
 - R 用户可选：`analysis/report.qmd`（Quarto，读同一份 CSV，非必需）。
 - 需要给老板 xlsx 时，从 CSV 导出并映射中文表头（映射表在 schema.md）。
+
+### 投放复盘走 `skills/campaign-report/`（2026-08-18 立）
+
+**发布之后的事不在本文件管**，交给子 skill：`skills/campaign-report/SKILL.md`。
+它管三样本文件不管的东西——
+
+1. **口径字典**：成本拆五列（分析一律用 `cost_net` 净成本）、禁止裸写 CPM（必带
+   `_曝光`/`_阅读` 后缀）、点击用去噪后独立访客、基线按「格式 × 是否报备」取联合值、
+   D+7 固定为决策点。起因是 R1 同一批数据被算出三个 CPC（差 38%）。
+2. **预测打分**：`score.py` 先跑成本恒等式校验（不自洽直接退出），再出 rho + 置换概率 +
+   MAPE + 危险错误（top-1 是否选错 / 是否负相关）。
+3. **假设台账**：`hypotheses.md`，每条必填**识别策略**；识别策略为「无」时判定不得写
+   「成立」，只能写「无法判定」。
+
+**与本文件第 8 节（预期曝光估算）的关系**：第 8 节负责投放前估，campaign-report 负责事后
+对账并把结论打回来。R1 已推翻第 8 节的一个前提——**机器列会排序，不会估量**，
+`expected_exposure` 与 `预估CPM` 可用于选人排序，**禁止**用于预算分配与 CPM 预测
+（预估 CPM 在 R1 与实际 rho=−0.80，方向有害）。详见 `docs/decisions.md` 2026-08-18 条。
 
 ## 12. 脱敏导出（维护者专用）
 
